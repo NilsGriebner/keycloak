@@ -18,6 +18,10 @@ package org.keycloak.broker.oidc;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import com.microsoft.graph.requests.DirectoryObjectCollectionWithReferencesPage;
+import com.microsoft.graph.requests.GraphServiceClient;
+import okhttp3.Request;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.jboss.logging.Logger;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
@@ -64,6 +68,7 @@ import org.keycloak.services.resources.IdentityBrokerService;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
+import org.keycloak.utils.MsAzureClient;
 import org.keycloak.vault.VaultStringSecret;
 
 import jakarta.ws.rs.GET;
@@ -78,9 +83,7 @@ import jakarta.ws.rs.core.UriInfo;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * @author Pedro Igor
@@ -686,6 +689,21 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
 
         String iss = token.getIssuer();
 
+        //https://learn.microsoft.com/en-us/security/zero-trust/develop/configure-tokens-group-claims-app-roles#group-overages
+       if (token.getOtherClaims().containsKey("_claim_names")) {
+           try {
+               List<String> groups = getMicrosoftGroups(token, encodedToken);
+
+               if (!groups.isEmpty()) {
+                   //token.getOtherClaims().putAll(claims);
+                   token.getOtherClaims().remove("_claim_names");
+                   token.getOtherClaims().remove("_claim_sources");
+               }
+           } catch (IOException exp) {
+              throw new RuntimeException(exp);
+           }
+        }
+
         if (!token.isActive(getConfig().getAllowedClockSkew())) {
             throw new IdentityBrokerException("Token is no longer valid");
         }
@@ -949,5 +967,23 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
             return keyStorage.reloadKeys(modelKey, new OIDCIdentityProviderPublicKeyLoader(session, getConfig()));
         }
         return false;
+    }
+
+    private List<String> getMicrosoftGroups(JsonWebToken token, String encodedToken) throws IOException {
+        Map<?,?> claimNames = (Map<?,?>) token.getOtherClaims().get("_claim_names");
+
+        for (Object key : claimNames.keySet()) {
+            String keyName = (String) key;
+            if (keyName.equals("groups")) {
+                final String clientId = getConfig().getClientId();
+                final String issuer = token.getIssuer();
+                final String clientSecret = getConfig().getClientSecret();
+                final String userId = token.issuedFor;
+
+                MsAzureClient azureClient = new MsAzureClient(clientId, clientSecret, issuer);
+                return azureClient.getUserGroups(userId);
+            }
+        }
+        return null;
     }
 }

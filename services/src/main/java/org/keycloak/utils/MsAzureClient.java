@@ -10,7 +10,6 @@ import com.microsoft.graph.requests.DirectoryObjectCollectionWithReferencesReque
 import com.microsoft.graph.requests.GraphServiceClient;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -20,16 +19,14 @@ public class MsAzureClient {
 
     private final String clientSecret;
 
-    private final String issuer;
-
-    private String tenantId;
+    private final String tenantId;
 
     public MsAzureClient(final String clientId, final String clientSecret, final String issuer) {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
-        this.issuer = issuer;
 
-        extractTenantId();
+        String[] parts = issuer.split("/");
+        tenantId = parts[parts.length-1];
     }
 
     public List<String> getUserGroups(String userId) {
@@ -69,10 +66,5 @@ public class MsAzureClient {
 
         return GraphServiceClient.builder().authenticationProvider( authProvider ).buildClient();
 
-    }
-
-    private void extractTenantId() {
-        String[] parts = issuer.split("/");
-        tenantId = parts[parts.length-1];
     }
 }

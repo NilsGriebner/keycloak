@@ -692,7 +692,7 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
         //https://learn.microsoft.com/en-us/security/zero-trust/develop/configure-tokens-group-claims-app-roles#group-overages
        if (token.getOtherClaims().containsKey("_claim_names")) {
            try {
-               List<String> groups = getMicrosoftGroups(token, encodedToken);
+               List<String> groups = getMicrosoftGroups(token);
 
                if (!groups.isEmpty()) {
                    //token.getOtherClaims().putAll(claims);
@@ -969,7 +969,7 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
         return false;
     }
 
-    private List<String> getMicrosoftGroups(JsonWebToken token, String encodedToken) throws IOException {
+    private List<String> getMicrosoftGroups(JsonWebToken token) throws IOException {
         Map<?,?> claimNames = (Map<?,?>) token.getOtherClaims().get("_claim_names");
 
         for (Object key : claimNames.keySet()) {
@@ -978,7 +978,7 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
                 final String clientId = getConfig().getClientId();
                 final String issuer = token.getIssuer();
                 final String clientSecret = getConfig().getClientSecret();
-                final String userId = token.issuedFor;
+                final String userId = token.getIssuedFor();
 
                 MsAzureClient azureClient = new MsAzureClient(clientId, clientSecret, issuer);
                 return azureClient.getUserGroups(userId);

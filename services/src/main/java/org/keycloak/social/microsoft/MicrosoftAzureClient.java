@@ -1,4 +1,4 @@
-package org.keycloak.utils;
+package org.keycloak.social.microsoft;
 
 import com.azure.identity.ClientSecretCredential;
 import com.azure.identity.ClientSecretCredentialBuilder;
@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class MsAzureClient {
+public class MicrosoftAzureClient {
 
     private final String clientId;
 
@@ -21,12 +21,12 @@ public class MsAzureClient {
 
     private final String tenantId;
 
-    public MsAzureClient(final String clientId, final String clientSecret, final String issuer) {
+    public MicrosoftAzureClient(final String clientId, final String clientSecret, final String issuer) {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
 
         String[] parts = issuer.split("/");
-        tenantId = parts[parts.length-1];
+        tenantId = parts[parts.length-2];
     }
 
     public List<String> getUserGroups(String userId) {

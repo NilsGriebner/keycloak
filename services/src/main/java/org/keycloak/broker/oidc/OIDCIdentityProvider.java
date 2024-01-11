@@ -18,10 +18,6 @@ package org.keycloak.broker.oidc;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import com.microsoft.graph.requests.DirectoryObjectCollectionWithReferencesPage;
-import com.microsoft.graph.requests.GraphServiceClient;
-import okhttp3.Request;
-import org.apache.http.impl.client.CloseableHttpClient;
 import org.jboss.logging.Logger;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
@@ -67,8 +63,9 @@ import org.keycloak.services.messages.Messages;
 import org.keycloak.services.resources.IdentityBrokerService;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.social.microsoft.MicrosoftAzureClaims;
 import org.keycloak.util.JsonSerialization;
-import org.keycloak.utils.MsAzureClient;
+import org.keycloak.social.microsoft.MicrosoftAzureClient;
 import org.keycloak.vault.VaultStringSecret;
 
 import jakarta.ws.rs.GET;
@@ -363,10 +360,38 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
             throw new IdentityBrokerException("Could not decode access token response.", e);
         }
         String accessToken = verifyAccessToken(tokenResponse);
-
         String encodedIdToken = tokenResponse.getIdToken();
 
         JsonWebToken idToken = validateToken(encodedIdToken);
+
+        // We need to manually retrieve groups of the user.
+        // See https://docs.microsoft.com/en-us/azure/active-directory/develop/id-tokens#groups-overage-claim
+        if (idToken.getOtherClaims().containsKey("_claim_names")) {
+            logger.debug("detected group overages in token received from microsoft");
+
+            JWSInput pac = (JWSInput) JOSEParser.parse(accessToken);
+            String content = new String(pac.getContent());
+
+            MicrosoftAzureClaims claims;
+            try {
+                claims = JsonSerialization.readValue(content, MicrosoftAzureClaims.class);
+            } catch (IOException e) {
+               throw new IdentityBrokerException("unable to deserialize access token claims");
+            }
+
+            String userId = claims.getUserId();
+            List<String> groups = getMicrosoftGroups(idToken, userId);
+            Map<String, List<String>> groupClaim = new HashMap<>();
+            groupClaim.put("groups", groups);
+
+            if (!groups.isEmpty()) {
+                idToken.getOtherClaims().putAll(groupClaim);
+                idToken.getOtherClaims().remove("_claim_names");
+                idToken.getOtherClaims().remove("_claim_sources");
+            } else {
+                throw new IdentityBrokerException("Retrieved groups are empty");
+            }
+        }
 
         if (getConfig().isPassMaxAge()) {
             AuthenticationSessionModel authSession = session.getContext().getAuthenticationSession();
@@ -689,20 +714,6 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
 
         String iss = token.getIssuer();
 
-        //https://learn.microsoft.com/en-us/security/zero-trust/develop/configure-tokens-group-claims-app-roles#group-overages
-       if (token.getOtherClaims().containsKey("_claim_names")) {
-           try {
-               List<String> groups = getMicrosoftGroups(token);
-
-               if (!groups.isEmpty()) {
-                   //token.getOtherClaims().putAll(claims);
-                   token.getOtherClaims().remove("_claim_names");
-                   token.getOtherClaims().remove("_claim_sources");
-               }
-           } catch (IOException exp) {
-              throw new RuntimeException(exp);
-           }
-        }
 
         if (!token.isActive(getConfig().getAllowedClockSkew())) {
             throw new IdentityBrokerException("Token is no longer valid");
@@ -969,21 +980,21 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
         return false;
     }
 
-    private List<String> getMicrosoftGroups(JsonWebToken token) throws IOException {
-        Map<?,?> claimNames = (Map<?,?>) token.getOtherClaims().get("_claim_names");
+    private List<String> getMicrosoftGroups(final JsonWebToken idToken, final String userId) {
+        Map<?,?> claimNames = (Map<?,?>) idToken.getOtherClaims().get("_claim_names");
 
         for (Object key : claimNames.keySet()) {
             String keyName = (String) key;
             if (keyName.equals("groups")) {
-                final String clientId = getConfig().getClientId();
-                final String issuer = token.getIssuer();
-                final String clientSecret = getConfig().getClientSecret();
-                final String userId = token.getIssuedFor();
 
-                MsAzureClient azureClient = new MsAzureClient(clientId, clientSecret, issuer);
+                final String clientId = getConfig().getClientId();
+                final String issuer = idToken.getIssuer();
+                final String clientSecret = getConfig().getClientSecret();
+
+                MicrosoftAzureClient azureClient = new MicrosoftAzureClient(clientId, clientSecret, issuer);
                 return azureClient.getUserGroups(userId);
             }
         }
-        return null;
+        throw new IdentityBrokerException("Microsoft api did not return valid claims");
     }
 }

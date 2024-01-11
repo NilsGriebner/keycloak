@@ -379,18 +379,24 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
                throw new IdentityBrokerException("unable to deserialize access token claims");
             }
 
-            String userId = claims.getUserId();
-            List<String> groups = getMicrosoftGroups(idToken, userId);
+            final String userId = claims.getUserId();
+            final String clientId = getConfig().getClientId();
+            final String issuer = idToken.getIssuer();
+            final String clientSecret = getConfig().getClientSecret();
+
+            MicrosoftAzureClient azureClient = new MicrosoftAzureClient(clientId, clientSecret, issuer);
+            List<String> groups = azureClient.getUserGroups(userId);
+
+            if(groups.isEmpty()) {
+                throw new IdentityBrokerException("Retrieved groups are empty");
+            }
+
             Map<String, List<String>> groupClaim = new HashMap<>();
             groupClaim.put("groups", groups);
 
-            if (!groups.isEmpty()) {
-                idToken.getOtherClaims().putAll(groupClaim);
-                idToken.getOtherClaims().remove("_claim_names");
-                idToken.getOtherClaims().remove("_claim_sources");
-            } else {
-                throw new IdentityBrokerException("Retrieved groups are empty");
-            }
+            idToken.getOtherClaims().putAll(groupClaim);
+            idToken.getOtherClaims().remove("_claim_names");
+            idToken.getOtherClaims().remove("_claim_sources");
         }
 
         if (getConfig().isPassMaxAge()) {
@@ -978,23 +984,5 @@ public class OIDCIdentityProvider extends AbstractOAuth2IdentityProvider<OIDCIde
             return keyStorage.reloadKeys(modelKey, new OIDCIdentityProviderPublicKeyLoader(session, getConfig()));
         }
         return false;
-    }
-
-    private List<String> getMicrosoftGroups(final JsonWebToken idToken, final String userId) {
-        Map<?,?> claimNames = (Map<?,?>) idToken.getOtherClaims().get("_claim_names");
-
-        for (Object key : claimNames.keySet()) {
-            String keyName = (String) key;
-            if (keyName.equals("groups")) {
-
-                final String clientId = getConfig().getClientId();
-                final String issuer = idToken.getIssuer();
-                final String clientSecret = getConfig().getClientSecret();
-
-                MicrosoftAzureClient azureClient = new MicrosoftAzureClient(clientId, clientSecret, issuer);
-                return azureClient.getUserGroups(userId);
-            }
-        }
-        throw new IdentityBrokerException("Microsoft api did not return valid claims");
     }
 }
